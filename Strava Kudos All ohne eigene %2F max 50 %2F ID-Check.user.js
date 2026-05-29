@@ -1,6 +1,6 @@
 // ==UserScript==
-// @name         Strava Kudos All ohne eigene / max 50 / ID-Check
-// @version      1.3
+// @name         Strava Kudos All ohne eigene / max 50 / Gruppenfix
+// @version      1.4
 // @match        https://www.strava.com/dashboard*
 // @run-at       document-idle
 // @inject-into  auto
@@ -10,18 +10,14 @@
 (function () {
   'use strict';
 
-  const BUTTON_ID = 'strava-kudos-all-skip-own-limit';
+  const BUTTON_ID = 'strava-kudos-all-group-fix';
   const MAX_KUDOS = 50;
-
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
   function getMyAthleteId() {
     const links = Array.from(document.querySelectorAll("a[href*='/athletes/']"));
     for (const link of links) {
       const m = link.href.match(/\/athletes\/(\d+)/);
-      if (m && (
-        link.closest('[data-testid*="user"], [data-testid*="avatar"], nav, header, [class*="user"], [class*="avatar"]')
-      )) {
+      if (m && link.closest('nav, header, [data-testid*="user"], [data-testid*="avatar"], [class*="user"], [class*="avatar"]')) {
         return m[1];
       }
     }
@@ -32,21 +28,24 @@
     return Array.from(document.querySelectorAll("div[data-testid='web-feed-entry'], article, .feed-entry"));
   }
 
-  function getCardAthleteId(card) {
-    const athleteLink = card.querySelector("a[href*='/athletes/']");
-    if (!athleteLink) return null;
-    const m = athleteLink.href.match(/\/athletes\/(\d+)/);
-    return m ? m[1] : null;
+  function getCardAthleteIds(card) {
+    const ids = new Set();
+    const links = Array.from(card.querySelectorAll("a[href*='/athletes/']"));
+    for (const link of links) {
+      const m = link.href.match(/\/athletes\/(\d+)/);
+      if (m) ids.add(m[1]);
+    }
+    return ids;
   }
 
   function isOwnActivity(card, myAthleteId) {
-    const cardAthleteId = getCardAthleteId(card);
-    return !!myAthleteId && !!cardAthleteId && cardAthleteId === myAthleteId;
+    if (!myAthleteId) return false;
+    const ids = getCardAthleteIds(card);
+    return ids.has(myAthleteId);
   }
 
-  function getUnkudoedButton(card) {
-    const buttons = Array.from(card.querySelectorAll("button[data-testid='kudos_button']"));
-    return buttons.find(btn => {
+  function getUnkudoedButtons(card) {
+    return Array.from(card.querySelectorAll("button[data-testid='kudos_button']")).filter(btn => {
       const hasUnfilledIcon = !!btn.querySelector("svg[data-testid='unfilled_kudos']");
       const isViewAll = (btn.getAttribute('title') || '').trim() === 'View all kudos';
       return hasUnfilledIcon && !isViewAll && !btn.disabled;
@@ -72,21 +71,26 @@
         continue;
       }
 
-      const btn = getUnkudoedButton(card);
-      if (!btn) {
+      const buttons = getUnkudoedButtons(card);
+
+      if (!buttons.length) {
         skippedNoButton++;
         continue;
       }
 
-      btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      await sleep(700);
+      for (const btn of buttons) {
+        if (clicked >= MAX_KUDOS) break;
 
-      if (clicked >= MAX_KUDOS) break;
+        if (!btn.isConnected || btn.disabled) continue;
 
-      btn.click();
-      clicked++;
-      console.log(`Kudos ${clicked}/${MAX_KUDOS}`);
-      await sleep(900);
+        const stillUnkudoed = !!btn.querySelector("svg[data-testid='unfilled_kudos']");
+        if (!stillUnkudoed) continue;
+
+        btn.scrollIntoView({ behavior: 'auto', block: 'center' });
+        btn.click();
+        clicked++;
+        console.log(`Kudos ${clicked}/${MAX_KUDOS}`);
+      }
     }
 
     alert(
